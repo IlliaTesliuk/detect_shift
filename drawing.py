@@ -9,13 +9,13 @@ from utils import load_w_hat, calculate_p_value, load_array
 BOX_PROPS = dict(boxstyle="round", facecolor="white", alpha=0.5)
 with plt.style.context("science"):
     SCOLORS = {
-        "blue": sns.color_palette()[0],
-        "green": sns.color_palette()[1],
-        "yellow": sns.color_palette()[2],
         "red": sns.color_palette()[3],
+        "green": sns.color_palette()[1],
+        "blue": sns.color_palette()[0],
+        "yellow": sns.color_palette()[2],
         "purple": sns.color_palette()[4],
-        "black": sns.color_palette()[5],
         "gray": sns.color_palette()[6],
+        "black": sns.color_palette()[5],
     }
 
 from utils import load_array
@@ -68,7 +68,7 @@ def load_pvalues_single(
         s = sorted(
             float(re.findall("\d+\.\d+", f)[0])
             for f in os.listdir(f"{exp_dir}")
-            if f.startswith("p_values")
+            if f.startswith("p_values") and f.endswith(f"_{n}.npy")
         )
     ss = []
     pvalues = []
@@ -112,19 +112,120 @@ def process_all(ss1, ss2, ss3, pc1, pc2, pc3, title, save_path=None):
         #
 
 
+def plot_dataset(ss, pc, names, title, figsize=(8, 5), save_path=None):
+    assert len(ss) == len(pc)
+    assert len(pc) == len(names)
+    n_methods = len(ss)
+    colors = ["r-", "g-", "b-", "m-", "y-", "c-"]
+    legend = []
+    with plt.style.context("science"):
+        plt.rcParams.update({"font.size": 16})
+
+        fig = plt.figure(figsize=figsize)
+        for i in range(n_methods):
+            plt.plot(ss[i], pc[i], colors[i])
+            legend.append(f"{names[i]}: {pc[i][0]:.2f}")
+
+        plt.hlines(y=0.05, xmin=0.0, xmax=1.0, linestyles="dashdot", colors="k")
+        plt.legend(legend, loc="center right")
+
+        plt.xlabel(f"Percentage of Labels Flipped ($\%$)")
+        # plt.xlabel(f"Label Flipping Attack Rate (%)")
+        plt.ylabel(f"Rejection Rate of $H_0$ ($\%$)")
+        # plt.ylabel(f"$H_0$ Rejection Percentage (%)")
+        plt.title(title)
+        plt.xlim(0, 1.05)
+        plt.ylim(0, 1.05)
+
+        if save_path:
+            plt.savefig(save_path)
+            plt.close()
+            plt.clf()
+        else:
+            plt.show()
+        #
+
+
+DATASETS = [
+    "artificial_0.0",
+    "artificial_0.1",
+    "artificial_0.5",
+    "adult_income",
+    "bank_marketing",
+    "credit_default",
+    "credit_risk",
+    "pulsars",
+    "cifar10_binary",
+    "mnist_binary",
+]
+
+METHOD_NAMES = {
+    "kl_boot": "KL Boot",
+    "kl_dr": "KL DR",
+    "cdd": "CDD",
+    "mmd": "MMD",
+    "wrs": "WRS",
+    "wrs_dt": "WRS"
+}
+
+
+def dataset_name(ds: str):
+    if ds.startswith("artificial"):
+        name = f"Artificial (s={ds[-3:]})"
+    elif ds.endswith("binary"):
+        name = ds.split("_")[0].upper() + " Binary"
+    else:
+        name = " ".join(ds.split("_")).title()
+    return name
+
+
+def process_experiments(exp_dir, methods, figsize=(8, 5), save=True):
+    plots_dir = os.path.join(exp_dir, "plots")
+    os.makedirs(plots_dir, exist_ok=True)
+
+    for dataset in DATASETS:
+        print(dataset)
+        ds_dir = os.path.join(exp_dir, dataset)
+
+        ds_name = dataset_name(dataset)
+        ds_save_name = "artificial" if dataset.startswith("artificial") else dataset
+        attack_perc, p_values, m_names = [], [], []
+        for method in methods:
+            method_name = METHOD_NAMES[method]
+            method_dir = os.path.join(ds_dir, method if not method.startswith("wrs") else "wrs")
+            if os.path.exists(method_dir) and len(os.listdir(method_dir)) > 0:
+                ap, pv = load_pvalues_single(method_dir, ds_save_name, None, method)
+
+                attack_perc.append(ap)
+                p_values.append(pv)
+                m_names.append(method_name)
+
+        plot_dataset(
+            attack_perc,
+            p_values,
+            m_names,
+            ds_name,
+            figsize,
+            save_path=f"{plots_dir}/{dataset}.png" if save else None,
+        )
+    draw_grid(plots_dir, True)
+
+
 def draw_grid(exp_dir, save=False):
-    img = Image.open(f"{exp_dir}/adult_income.png")
+    img = Image.open(f"{exp_dir}/artificial_0.0.png")
     w, h = img.size
     print(w, h)
-    grid = Image.new("RGB", [w * 4, h * 2])
+    grid = Image.new("RGB", [w * 4, h * 3], color=(255, 255, 255))
     grid.paste(img, [0, 0])
-    grid.paste(Image.open(f"{exp_dir}/bank_marketing.png"), [w, 0])
-    grid.paste(Image.open(f"{exp_dir}/credit_default.png"), [2 * w, 0])
-    grid.paste(Image.open(f"{exp_dir}/credit_risk.png"), [3 * w, 0])
-    grid.paste(Image.open(f"{exp_dir}/pulsars.png"), [0, h])
-    grid.paste(Image.open(f"{exp_dir}/custom.png"), [w, h])
-    grid.paste(Image.open(f"{exp_dir}/cifar10_binary.png"), [2 * w, h])
-    grid.paste(Image.open(f"{exp_dir}/mnist_binary.png"), [3 * w, h])
+    grid.paste(Image.open(f"{exp_dir}/artificial_0.1.png"), [w, 0])
+    grid.paste(Image.open(f"{exp_dir}/artificial_0.5.png"), [2 * w, 0])
+    grid.paste(Image.open(f"{exp_dir}/adult_income.png"), [3 * w, 0])
+    grid.paste(Image.open(f"{exp_dir}/bank_marketing.png"), [0, h])
+    grid.paste(Image.open(f"{exp_dir}/credit_default.png"), [w, h])
+    grid.paste(Image.open(f"{exp_dir}/credit_risk.png"), [2 * w, h])
+    grid.paste(Image.open(f"{exp_dir}/pulsars.png"), [3 * w, h])
+    grid.paste(Image.open(f"{exp_dir}/cifar10_binary.png"), [w, 2 * h])
+    grid.paste(Image.open(f"{exp_dir}/mnist_binary.png"), [2 * w, 2 * h])
     if save:
         grid.save(f"{exp_dir}/grid.png")
         return

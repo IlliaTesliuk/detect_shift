@@ -12,12 +12,17 @@ from tests.mmd import mmd_test
 from tests.kl_boot import kl_boot_test
 from tests.kl_samp import kl_samp_test
 from tests.kl_dr import kl_dr_test
+import rpy2.robjects as robjects
+from rpy2.robjects import numpy2ri
 
+numpy2ri.activate()
+robjects.r.source("wrs.R")
+wrs_test = robjects.globalenv["wrs_test"]
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--method", type=str, choices=["kl_boot", "kl_samp", "kl_dr", "cdd", "mmd"]
+        "--method", type=str, choices=["kl_boot", "kl_samp", "kl_dr", "cdd", "mmd", "wrs"]
     )
     parser.add_argument("--dataset", type=str)
     parser.add_argument("--ds_cov", type=float, default=0.0)
@@ -89,22 +94,40 @@ def main():
                 s=args.ds_cov,
             )
             # Call the test method
-            p_values[i] = test_func(
-                *ds.source,
-                *ds.target,
-                n_boot=args.n_bootstrap,
-                seed=seeds[i],
-                **method_kwargs,
-            )
+            if args.method == "wrs":
+                x_src, y_src = ds_to_r(*ds.source)
+                x_tgt, y_tgt = ds_to_r(*ds.target)
+                p_values[i] = float(test_func(x_src, y_src, x_tgt, y_tgt, args.model)[0])
+            else:
+                p_values[i] = test_func(
+                    *ds.source,
+                    *ds.target,
+                    n_boot=args.n_bootstrap,
+                    seed=seeds[i],
+                    **method_kwargs,
+                )
 
         # Save p-values
-        p_value_path = f"{args.exp_dir}/p_values_{args.dataset}_{attack_split:.2f}_{args.method}.npy"
+        p_value_path = f"{args.exp_dir}/p_values_{args.dataset}_{attack_split:.2f}_{args.method}_{args.model}.npy"
         write_array(p_values, p_value_path)
 
         n_rejected = (p_values < args.alpha).sum()
         perc_rejected = ((n_rejected / len(p_values)) * 100.0).astype(int)
 
         print(f"rejected: {perc_rejected}%, failed to reject: {100-perc_rejected}%")
+
+def ds_to_r(X, y):
+    X = np_to_r_matrix(X)
+    y = np_to_r_vector(y)
+    #y = np_to_r_matrix(y)
+    return X, y
+
+def np_to_r_vector(np_array):
+    return robjects.FloatVector(np_array.flatten())
+
+
+def np_to_r_matrix(np_array):
+    return robjects.r.matrix(np_array, nrow=np_array.shape[0], ncol=np_array.shape[1], byrow=True)
 
 
 def process_model_params(args: argparse.Namespace):
@@ -149,6 +172,7 @@ def process_test_method(args: argparse.Namespace):
         "kl_dr": kl_dr_test,
         "cdd": cdd_test,
         "mmd": mmd_test,
+        "wrs": wrs_test
     }[args.method]
 
     return test_func, kwargs
